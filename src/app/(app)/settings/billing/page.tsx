@@ -6,6 +6,7 @@ import { PLAN_LIMITS } from "@/lib/plans";
 import { formatDate } from "@/lib/utils";
 import type { Metadata } from "next";
 import { Shield } from "lucide-react";
+import { PricingSection } from "@/components/PricingSection";
 
 export const metadata: Metadata = {
   title: "Billing & Plans | DocuSeal",
@@ -118,6 +119,12 @@ export default async function BillingPage() {
             </div>
           </div>
         </div>
+
+        {(isFree || subscription?.status !== "ACTIVE") && (
+          <div id="pricing" className="mt-16 pt-8 -mx-4 sm:-mx-8 border-t border-border">
+            <PricingSection isLoggedIn={true} />
+          </div>
+        )}
       </main>
     </div>
   );
