@@ -59,10 +59,13 @@ export const PLAN_LIMITS: Record<Plan, PlanLimits> = {
   },
 };
 
+// Prices in INR (₹)
+// Monthly = per month
+// Yearly = per month when billed annually (25% discount)
 export const PLAN_PRICES = {
-  STARTER: { monthly: 19, yearly: 15 },  // $15/mo billed annually
-  PRO: { monthly: 49, yearly: 39 },
-  BUSINESS: { monthly: 99, yearly: 79 },
+  STARTER: { monthly: 499,   yearly: 374,  yearlyTotal: 4499  },
+  PRO:     { monthly: 999,   yearly: 749,  yearlyTotal: 8999  },
+  BUSINESS:{ monthly: 1999,  yearly: 1499, yearlyTotal: 17999 },
 };
 
 export function isWithinLimit(

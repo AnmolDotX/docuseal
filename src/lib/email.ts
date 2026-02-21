@@ -51,10 +51,9 @@ export async function sendPasswordResetEmail(email: string, token: string) {
 export async function sendFailedPaymentEmail(
   email: string,
   name: string,
-  amount: string,
-  portalUrl: string,
   attempt: number
 ) {
+  const billingUrl = `${APP_URL}/settings/billing`;
   const subjects = [
     `Action required: Payment failed — ${APP_NAME}`,
     `Reminder: Your payment didn't go through — ${APP_NAME}`,
@@ -68,14 +67,15 @@ export async function sendFailedPaymentEmail(
     html: `
       <div style="font-family:Inter,sans-serif;max-width:560px;margin:0 auto;padding:32px 24px;">
         <h1 style="font-size:24px;font-weight:700;color:#111827;margin-bottom:8px;">Payment failed</h1>
-        <p style="color:#6b7280;margin-bottom:8px;">Hi ${name}, we couldn't process your payment of <strong>${amount}</strong>.</p>
-        <p style="color:#6b7280;margin-bottom:24px;">To keep your subscription active, please update your payment details.</p>
-        <a href="${portalUrl}" style="display:inline-block;background:#7c3aed;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600;font-size:15px;">Update Payment Details</a>
+        <p style="color:#6b7280;margin-bottom:8px;">Hi ${name}, we couldn't process your subscription payment.</p>
+        <p style="color:#6b7280;margin-bottom:24px;">To keep your subscription active, please visit your billing settings and update your payment details.</p>
+        <a href="${billingUrl}" style="display:inline-block;background:#7c3aed;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600;font-size:15px;">Update Payment Details</a>
         ${attempt >= 3 ? `<p style="color:#ef4444;font-size:13px;margin-top:16px;"><strong>This is our final notice.</strong> Your account will be downgraded to the Free plan if payment isn't updated within 24 hours.</p>` : ""}
       </div>
     `,
   });
 }
+
 
 // ─── Welcome Email (after plan upgrade) ───────────────────────────────────
 

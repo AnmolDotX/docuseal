@@ -18,14 +18,14 @@ model User {
   email         String    @unique
   emailVerified DateTime?
   image         String?
-  password      String?   // null for OAuth users
+  password      String? // null for OAuth users
   role          Role      @default(USER)
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
-  accounts     Account[]
-  sessions     Session[]
-  verificationTokens VerificationToken[]
+  accounts            Account[]
+  sessions            Session[]
+  verificationTokens  VerificationToken[]
   passwordResetTokens PasswordResetToken[]
 
   subscription Subscription?
@@ -108,53 +108,55 @@ enum SubscriptionStatus {
   ACTIVE
   PAST_DUE
   CANCELED
-  INCOMPLETE
-  INCOMPLETE_EXPIRED
-  UNPAID
+  HALTED // Razorpay: payment failed after all retries
   PAUSED
+  COMPLETED // Razorpay: billing cycles finished
 }
 
 model Subscription {
-  id                   String             @id @default(cuid())
-  userId               String             @unique
-  plan                 Plan               @default(FREE)
-  status               SubscriptionStatus @default(ACTIVE)
+  id     String             @id @default(cuid())
+  userId String             @unique
+  plan   Plan               @default(FREE)
+  status SubscriptionStatus @default(ACTIVE)
 
-  stripeCustomerId     String?            @unique
-  stripeSubscriptionId String?            @unique
-  stripePriceId        String?
-  stripeCurrentPeriodEnd DateTime?
-  stripeCancelAtPeriodEnd Boolean         @default(false)
+  // Razorpay fields
+  razorpaySubscriptionId String?   @unique
+  razorpayPlanId         String? // Razorpay plan ID (plan_xxx)
+  razorpayCustomerEmail  String? // email used for Razorpay contact
+  currentPeriodStart     DateTime?
+  currentPeriodEnd       DateTime?
+  cancelAtPeriodEnd      Boolean   @default(false)
 
-  trialEndsAt          DateTime?
-  canceledAt           DateTime?
+  trialEndsAt DateTime?
+  canceledAt  DateTime?
 
-  createdAt            DateTime          @default(now())
-  updatedAt            DateTime          @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   payments Payment[]
 
-  @@index([stripeCustomerId])
-  @@index([stripeSubscriptionId])
+  @@index([razorpaySubscriptionId])
 }
 
 model Payment {
-  id                    String   @id @default(cuid())
-  subscriptionId        String
-  stripePaymentIntentId String?
-  stripeInvoiceId       String?  @unique
-  amount                Int      // in cents
-  currency              String   @default("usd")
-  status                String   // paid, failed, pending
-  failureReason         String?
-  paidAt                DateTime?
-  createdAt             DateTime @default(now())
+  id                String    @id @default(cuid())
+  subscriptionId    String
+  razorpayPaymentId String?   @unique // pay_xxx
+  razorpayOrderId   String? // order_xxx
+  razorpayInvoiceId String?   @unique // inv_xxx (for idempotency)
+  amount            Int // in paise (INR) or smallest currency unit
+  currency          String    @default("INR")
+  status            String // paid, failed, pending
+  failureReason     String?
+  paidAt            DateTime?
+  createdAt         DateTime  @default(now())
 
   subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
 
   @@index([subscriptionId])
-  @@index([stripeInvoiceId])
+  @@index([razorpayPaymentId])
+  @@index([razorpayInvoiceId])
 }
 
 // ─── Documents ──────────────────────────────────────────────────────────────
@@ -176,20 +178,20 @@ enum DocumentStatus {
 }
 
 model Document {
-  id          String         @id @default(cuid())
-  userId      String
-  type        DocumentType
-  status      DocumentStatus @default(DRAFT)
-  title       String
-  content     String         @db.Text
-  answers     Json           // form inputs used to generate
-  wordCount   Int            @default(0)
-  isWatermarked Boolean      @default(true)
-  shareToken  String?        @unique @default(cuid())
-  shareEnabled Boolean       @default(false)
+  id            String         @id @default(cuid())
+  userId        String
+  type          DocumentType
+  status        DocumentStatus @default(DRAFT)
+  title         String
+  content       String         @db.Text
+  answers       Json // form inputs used to generate
+  wordCount     Int            @default(0)
+  isWatermarked Boolean        @default(true)
+  shareToken    String?        @unique @default(cuid())
+  shareEnabled  Boolean        @default(false)
 
-  createdAt   DateTime       @default(now())
-  updatedAt   DateTime       @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -203,7 +205,7 @@ model Document {
 model UsageRecord {
   id        String   @id @default(cuid())
   userId    String
-  action    String   // "generate_document", "download_pdf", "ai_call"
+  action    String // "generate_document", "download_pdf", "ai_call"
   metadata  Json?
   createdAt DateTime @default(now())
 
@@ -218,7 +220,7 @@ model UsageRecord {
 model WaitlistEntry {
   id        String   @id @default(cuid())
   email     String   @unique
-  source    String?  // which tool page they came from
+  source    String? // which tool page they came from
   createdAt DateTime @default(now())
 
   @@index([email])

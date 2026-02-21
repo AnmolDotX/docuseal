@@ -1,228 +1,230 @@
 import { NextRequest, NextResponse } from "next/server";
-import { stripe } from "@/lib/stripe";
-import { getPlanFromPriceId } from "@/lib/stripe";
 import { prisma } from "@/lib/db";
-import {
-  sendFailedPaymentEmail,
-  sendWelcomeUpgradeEmail,
-} from "@/lib/email";
-import type Stripe from "stripe";
-import type { Plan, SubscriptionStatus } from "@prisma/client";
-
-// Stripe sends raw body — must NOT use json body parser
-export const runtime = "nodejs";
-
-const STRIPE_MAP: Record<string, SubscriptionStatus> = {
-  trialing: "TRIALING",
-  active: "ACTIVE",
-  past_due: "PAST_DUE",
-  canceled: "CANCELED",
-  incomplete: "INCOMPLETE",
-  incomplete_expired: "INCOMPLETE_EXPIRED",
-  unpaid: "UNPAID",
-  paused: "PAUSED",
-};
+import { verifyRazorpayWebhook, getPlanFromRazorpayPlanId } from "@/lib/razorpay";
+import { sendWelcomeUpgradeEmail, sendFailedPaymentEmail } from "@/lib/email";
 
 export async function POST(req: NextRequest) {
   const body = await req.text();
-  const signature = req.headers.get("stripe-signature");
+  const signature = req.headers.get("x-razorpay-signature") ?? "";
 
-  if (!signature) {
-    return NextResponse.json({ error: "Missing stripe-signature" }, { status: 400 });
+  // ── 1. Verify webhook signature ───────────────────────────────
+  if (!verifyRazorpayWebhook(body, signature)) {
+    console.error("[WEBHOOK] Invalid signature");
+    return NextResponse.json({ error: "Invalid signature" }, { status: 400 });
   }
 
-  let event: Stripe.Event;
+  let event: { event: string; payload: Record<string, { entity: Record<string, unknown> }> };
+  try {
+    event = JSON.parse(body);
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
+
+  const eventName = event.event;
+  const subscription = event.payload?.subscription?.entity as Record<string, unknown> | undefined;
+  const payment = event.payload?.payment?.entity as Record<string, unknown> | undefined;
+
+  console.log(`[WEBHOOK] ${eventName}`, subscription?.id ?? payment?.id);
 
   try {
-    event = stripe.webhooks.constructEvent(
-      body,
-      signature,
-      process.env.STRIPE_WEBHOOK_SECRET!
-    );
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : "Unknown error";
-    console.error(`Webhook signature verification failed: ${msg}`);
-    return NextResponse.json({ error: `Webhook error: ${msg}` }, { status: 400 });
-  }
+    switch (eventName) {
 
-  // Idempotency check — skip already-processed events
-  const existingPayment = await prisma.payment.findFirst({
-    where: { stripeInvoiceId: event.id },
-  });
-  if (existingPayment) {
-    return NextResponse.json({ received: true, skipped: "duplicate" });
-  }
+      // ── Subscription activated (after first payment or trial) ─
+      case "subscription.activated": {
+        if (!subscription) break;
+        const subId = subscription.id as string;
+        const planId = subscription.plan_id as string;
+        const notes = subscription.notes as Record<string, string> | undefined;
+        const userId = notes?.userId;
 
-  try {
-    switch (event.type) {
-      // ─── Checkout Completed ─────────────────────────────────────────────
-      case "checkout.session.completed": {
-        const session = event.data.object as Stripe.Checkout.Session;
-        const userId = session.metadata?.userId;
-        const plan = session.metadata?.plan;
-        if (!userId || !plan) break;
+        if (!userId) {
+          console.error("[WEBHOOK] No userId in notes for subscription", subId);
+          break;
+        }
 
-        const stripeSubscriptionId = session.subscription as string;
-        const stripeCustomerId = session.customer as string;
-
-        const sub = await stripe.subscriptions.retrieve(stripeSubscriptionId);
-        const priceId = sub.items.data[0]?.price?.id;
+        const plan = getPlanFromRazorpayPlanId(planId) ?? "STARTER";
+        const currentStart = subscription.current_start
+          ? new Date((subscription.current_start as number) * 1000)
+          : new Date();
+        const currentEnd = subscription.current_end
+          ? new Date((subscription.current_end as number) * 1000)
+          : null;
 
         await prisma.subscription.update({
           where: { userId },
           data: {
-            plan: plan.toUpperCase() as Plan,
-            status: STRIPE_MAP[sub.status] ?? "ACTIVE",
-            stripeCustomerId,
-            stripeSubscriptionId,
-            stripePriceId: priceId,
-            stripeCurrentPeriodEnd: new Date(sub.current_period_end * 1000),
-            trialEndsAt: sub.trial_end ? new Date(sub.trial_end * 1000) : null,
+            plan: plan as "STARTER" | "PRO" | "BUSINESS",
+            status: "ACTIVE",
+            razorpaySubscriptionId: subId,
+            razorpayPlanId: planId,
+            razorpayCustomerEmail: notes?.userEmail,
+            currentPeriodStart: currentStart,
+            currentPeriodEnd: currentEnd,
           },
         });
 
-        // Welcome email
-        const user = await prisma.user.findUnique({ where: { id: userId } });
+        // Send welcome email
+        const user = await prisma.user.findFirst({ where: { id: userId } });
         if (user?.email) {
-          await sendWelcomeUpgradeEmail(
-            user.email,
-            user.name ?? "there",
-            plan.charAt(0).toUpperCase() + plan.slice(1)
-          );
+          await sendWelcomeUpgradeEmail(user.email, user.name ?? "there", plan);
         }
         break;
       }
 
-      // ─── Subscription Updated (plan change, renewal) ─────────────────────
-      case "customer.subscription.updated": {
-        const sub = event.data.object as Stripe.Subscription;
-        const userId = sub.metadata?.userId;
-        if (!userId) break;
+      // ── Payment charged (recurring) ───────────────────────────
+      case "subscription.charged": {
+        if (!payment || !subscription) break;
+        const subId = subscription.id as string;
+        const paymentId = payment.id as string;
+        const orderId = payment.order_id as string | undefined;
+        const invoiceId = payment.invoice_id as string | undefined;
 
-        const priceId = sub.items.data[0]?.price?.id;
-        const planName = getPlanFromPriceId(priceId ?? "");
+        // Idempotency check
+        if (invoiceId) {
+          const existing = await prisma.payment.findUnique({
+            where: { razorpayInvoiceId: invoiceId },
+          });
+          if (existing) {
+            console.log("[WEBHOOK] Duplicate charged event, skipping");
+            break;
+          }
+        }
 
-        await prisma.subscription.update({
-          where: { userId },
-          data: {
-            plan: planName.toUpperCase() as Plan,
-            status: STRIPE_MAP[sub.status] ?? "ACTIVE",
-            stripePriceId: priceId,
-            stripeCurrentPeriodEnd: new Date(sub.current_period_end * 1000),
-            stripeCancelAtPeriodEnd: sub.cancel_at_period_end,
-            trialEndsAt: sub.trial_end ? new Date(sub.trial_end * 1000) : null,
-          },
+        // Update subscription period
+        const currentStart = subscription.current_start
+          ? new Date((subscription.current_start as number) * 1000)
+          : new Date();
+        const currentEnd = subscription.current_end
+          ? new Date((subscription.current_end as number) * 1000)
+          : null;
+
+        const dbSub = await prisma.subscription.findFirst({
+          where: { razorpaySubscriptionId: subId },
         });
+
+        if (dbSub) {
+          await prisma.$transaction([
+            prisma.subscription.update({
+              where: { id: dbSub.id },
+              data: {
+                status: "ACTIVE",
+                currentPeriodStart: currentStart,
+                currentPeriodEnd: currentEnd,
+              },
+            }),
+            prisma.payment.create({
+              data: {
+                subscriptionId: dbSub.id,
+                razorpayPaymentId: paymentId,
+                razorpayOrderId: orderId,
+                razorpayInvoiceId: invoiceId,
+                amount: (payment.amount as number) ?? 0,
+                currency: (payment.currency as string) ?? "INR",
+                status: "paid",
+                paidAt: new Date(),
+              },
+            }),
+          ]);
+        }
         break;
       }
 
-      // ─── Subscription Deleted/Canceled ───────────────────────────────────
-      case "customer.subscription.deleted": {
-        const sub = event.data.object as Stripe.Subscription;
-        const userId = sub.metadata?.userId;
-        if (!userId) break;
+      // ── Payment failed ─────────────────────────────────────────
+      case "subscription.halted": {
+        if (!subscription) break;
+        const subId = subscription.id as string;
+        const notes = subscription.notes as Record<string, string> | undefined;
 
-        await prisma.subscription.update({
-          where: { userId },
+        const dbSub = await prisma.subscription.findFirst({
+          where: { razorpaySubscriptionId: subId },
+        });
+
+        if (dbSub) {
+          await prisma.subscription.update({
+            where: { id: dbSub.id },
+            data: { status: "PAST_DUE" },
+          });
+
+          // Record failed payment
+          await prisma.payment.create({
+            data: {
+              subscriptionId: dbSub.id,
+              amount: 0,
+              currency: "INR",
+              status: "failed",
+              failureReason: "Subscription halted after multiple failed retries",
+            },
+          });
+
+          // Send dunning email
+          const user = await prisma.user.findFirst({
+            where: { id: dbSub.userId },
+          });
+          const email = user?.email ?? notes?.userEmail;
+          if (email) {
+            await sendFailedPaymentEmail(email, user?.name ?? "there", 1);
+          }
+        }
+        break;
+      }
+
+      // ── Subscription cancelled ────────────────────────────────
+      case "subscription.cancelled": {
+        if (!subscription) break;
+        const subId = subscription.id as string;
+
+        await prisma.subscription.updateMany({
+          where: { razorpaySubscriptionId: subId },
           data: {
             plan: "FREE",
             status: "CANCELED",
-            stripeSubscriptionId: null,
-            stripePriceId: null,
             canceledAt: new Date(),
+            razorpaySubscriptionId: null,
+            razorpayPlanId: null,
           },
         });
         break;
       }
 
-      // ─── Invoice Paid ────────────────────────────────────────────────────
-      case "invoice.paid": {
-        const invoice = event.data.object as Stripe.Invoice;
-        const customerId = invoice.customer as string;
-
-        const sub = await prisma.subscription.findUnique({
-          where: { stripeCustomerId: customerId },
-          include: { user: true },
+      // ── Subscription completed (all billing cycles done) ──────
+      case "subscription.completed": {
+        if (!subscription) break;
+        const subId = subscription.id as string;
+        await prisma.subscription.updateMany({
+          where: { razorpaySubscriptionId: subId },
+          data: { plan: "FREE", status: "COMPLETED" },
         });
-        if (!sub) break;
-
-        await prisma.payment.create({
-          data: {
-            subscriptionId: sub.id,
-            stripeInvoiceId: invoice.id,
-            stripePaymentIntentId: invoice.payment_intent as string,
-            amount: invoice.amount_paid,
-            currency: invoice.currency,
-            status: "paid",
-            paidAt: new Date(invoice.status_transitions.paid_at! * 1000),
-          },
-        });
-
-        // Reactivate if was past_due
-        if (sub.status === "PAST_DUE") {
-          await prisma.subscription.update({
-            where: { id: sub.id },
-            data: { status: "ACTIVE" },
-          });
-        }
         break;
       }
 
-      // ─── Invoice Payment Failed (Dunning) ─────────────────────────────────
-      case "invoice.payment_failed": {
-        const invoice = event.data.object as Stripe.Invoice;
-        const customerId = invoice.customer as string;
-        const attemptCount = invoice.attempt_count;
+      // ── Subscription updated (plan change) ────────────────────
+      case "subscription.updated": {
+        if (!subscription) break;
+        const subId = subscription.id as string;
+        const newPlanId = subscription.plan_id as string;
+        const newPlan = getPlanFromRazorpayPlanId(newPlanId);
 
-        const sub = await prisma.subscription.findUnique({
-          where: { stripeCustomerId: customerId },
-          include: { user: true },
-        });
-        if (!sub) break;
-
-        await prisma.subscription.update({
-          where: { id: sub.id },
-          data: { status: "PAST_DUE" },
-        });
-
-        // Record failed payment
-        await prisma.payment.create({
-          data: {
-            subscriptionId: sub.id,
-            stripeInvoiceId: invoice.id,
-            amount: invoice.amount_due,
-            currency: invoice.currency,
-            status: "failed",
-            failureReason: "Payment method declined",
-          },
-        });
-
-        // Send dunning email
-        if (sub.user?.email && sub.stripeCustomerId) {
-          const portalSession = await stripe.billingPortal.sessions.create({
-            customer: sub.stripeCustomerId,
-            return_url: `${process.env.NEXT_PUBLIC_APP_URL}/settings/billing`,
+        if (newPlan) {
+          await prisma.subscription.updateMany({
+            where: { razorpaySubscriptionId: subId },
+            data: {
+              plan: newPlan as "FREE" | "STARTER" | "PRO" | "BUSINESS",
+              razorpayPlanId: newPlanId,
+            },
           });
-
-          await sendFailedPaymentEmail(
-            sub.user.email,
-            sub.user.name ?? "there",
-            `$${(invoice.amount_due / 100).toFixed(2)}`,
-            portalSession.url,
-            attemptCount
-          );
         }
         break;
       }
 
       default:
-        // Unhandled event — no-op
-        break;
+        console.log(`[WEBHOOK] Unhandled event: ${eventName}`);
     }
-  } catch (err) {
-    console.error("Webhook handler error:", err);
-    return NextResponse.json({ error: "Webhook handler failed" }, { status: 500 });
-  }
 
-  return NextResponse.json({ received: true });
+    return NextResponse.json({ received: true });
+  } catch (error) {
+    console.error("[WEBHOOK_PROCESSING_ERROR]", error);
+    // Return 200 to acknowledge receipt even on processing error
+    // Razorpay retries on non-200 responses
+    return NextResponse.json({ received: true, warning: "Processing error" });
+  }
 }
