@@ -2,8 +2,8 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
-// Use gemini-1.5-flash — free tier: 15 RPM, 1M tokens/day
-const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+// Use gemini-2.5-flash — the latest stable and fast model for generation
+const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
 // ─── Document type → prompt builder ─────────────────────────────
 
