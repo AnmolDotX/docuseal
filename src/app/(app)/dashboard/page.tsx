@@ -7,7 +7,7 @@ import {
   DOCUMENT_TYPE_SLUGS,
   formatDate,
 } from "@/lib/utils";
-import { PLAN_LIMITS } from "@/lib/plans";
+import { PLAN_LIMITS, PLAN_PRICES } from "@/lib/plans";
 import { FileText, Plus, ArrowRight, LogOut, Settings } from "lucide-react";
 import type { Metadata } from "next";
 
@@ -164,7 +164,7 @@ export default async function DashboardPage() {
                     : `You've used ${usedThisMonth} of ${limits.docsPerMonth} free documents this month.`}
                 </p>
                 <p className="text-xs text-amber-600 dark:text-amber-400 mt-0.5">
-                  Upgrade to Starter for 20 docs/mo at $19/mo.
+                  Upgrade to Starter for 20 docs/mo at ₹{PLAN_PRICES.STARTER.monthly}/mo.
                 </p>
               </div>
               <Link

@@ -13,6 +13,7 @@ import {
   Clock,
   ChevronDown,
 } from "lucide-react";
+import { PricingSection } from "@/components/PricingSection";
 
 export const metadata: Metadata = {
   title: "Free AI Legal Document Generator — Privacy Policy, NDA, Contracts",
@@ -195,54 +196,6 @@ const FAQS = [
   },
 ];
 
-const PRICING = [
-  {
-    name: "Free",
-    price: { monthly: 0, yearly: 0 },
-    description: "For individuals just getting started",
-    features: [
-      "3 documents per month",
-      "3 document types (Privacy Policy, ToS, NDA)",
-      "Watermarked PDF download",
-      "Copy to clipboard",
-    ],
-    cta: "Get Started Free",
-    href: "/signup",
-    highlighted: false,
-  },
-  {
-    name: "Starter",
-    price: { monthly: 19, yearly: 15 },
-    description: "For freelancers and small businesses",
-    features: [
-      "20 documents per month",
-      "All 8 document types",
-      "AI-powered generation",
-      "Clean PDF (no watermark)",
-      "Custom company branding",
-      "Shareable document links",
-    ],
-    cta: "Start 14-day Free Trial",
-    href: "/signup?plan=starter",
-    highlighted: true,
-  },
-  {
-    name: "Pro",
-    price: { monthly: 49, yearly: 39 },
-    description: "For growing teams and agencies",
-    features: [
-      "Unlimited documents",
-      "All 8 document types",
-      "AI-powered generation",
-      "Clean PDF (no watermark)",
-      "Custom branding + 3 team seats",
-      "Shareable links + e-signature",
-    ],
-    cta: "Start 14-day Free Trial",
-    href: "/signup?plan=pro",
-    highlighted: false,
-  },
-];
 
 export default function HomePage() {
   return (
@@ -501,75 +454,7 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* ─── Pricing ──────────────────────────────────────────────────── */}
-      <section id="pricing" className="py-20 px-4">
-        <div className="max-w-6xl mx-auto">
-          <div className="text-center mb-12">
-            <h2 className="text-3xl font-bold text-foreground mb-4">
-              Simple, transparent pricing
-            </h2>
-            <p className="text-muted-foreground">
-              Start free. Upgrade when you need more.
-            </p>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-start">
-            {PRICING.map((plan) => (
-              <div
-                key={plan.name}
-                className={`relative rounded-2xl p-8 border ${
-                  plan.highlighted
-                    ? "border-primary shadow-lg shadow-primary/10 bg-card"
-                    : "border-border bg-card"
-                }`}
-              >
-                {plan.highlighted && (
-                  <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-primary text-primary-foreground text-xs font-semibold px-3 py-1 rounded-full">
-                    Most Popular
-                  </div>
-                )}
-                <h3 className="font-bold text-xl text-foreground mb-1">
-                  {plan.name}
-                </h3>
-                <p className="text-sm text-muted-foreground mb-4">
-                  {plan.description}
-                </p>
-                <div className="mb-6">
-                  <span className="text-4xl font-extrabold text-foreground">
-                    ${plan.price.monthly}
-                  </span>
-                  {plan.price.monthly > 0 && (
-                    <span className="text-muted-foreground text-sm">
-                      /month
-                    </span>
-                  )}
-                </div>
-                <ul className="space-y-3 mb-8">
-                  {plan.features.map((f) => (
-                    <li key={f} className="flex items-start gap-2.5 text-sm">
-                      <Check className="w-4 h-4 text-green-500 shrink-0 mt-0.5" />
-                      <span className="text-foreground">{f}</span>
-                    </li>
-                  ))}
-                </ul>
-                <Link
-                  href={plan.href}
-                  className={`block w-full text-center font-semibold py-3 rounded-xl transition-all ${
-                    plan.highlighted
-                      ? "gradient-primary text-white hover:opacity-90"
-                      : "border border-border text-foreground hover:bg-muted"
-                  }`}
-                >
-                  {plan.cta}
-                </Link>
-              </div>
-            ))}
-          </div>
-          <p className="text-center text-sm text-muted-foreground mt-6">
-            All paid plans include a 14-day free trial · No credit card required
-            · Cancel anytime
-          </p>
-        </div>
-      </section>
+      <PricingSection />
 
       {/* ─── FAQ ──────────────────────────────────────────────────────── */}
       <section className="py-20 px-4 bg-muted/40">
