@@ -4,11 +4,12 @@ import { useState } from "react";
 import Link from "next/link";
 import { Check } from "lucide-react";
 import { PLAN_PRICES } from "@/lib/plans";
+import { RazorpayButton } from "./RazorpayButton";
 
 // Hardcoded exchange rate for estimate display (1 USD = ~83 INR)
 const USD_RATE = 83;
 
-export function PricingSection() {
+export function PricingSection({ isLoggedIn = false }: { isLoggedIn?: boolean }) {
   const [isYearly, setIsYearly] = useState(true);
   const [currency, setCurrency] = useState<"INR" | "USD">("INR");
 
@@ -31,6 +32,7 @@ export function PricingSection() {
       ],
       cta: "Get Started Free",
       href: "/signup",
+      planId: "FREE",
       highlighted: false,
     },
     {
@@ -47,6 +49,7 @@ export function PricingSection() {
       ],
       cta: "Start 14-day Free Trial",
       href: "/signup?plan=starter",
+      planId: "STARTER",
       highlighted: true,
     },
     {
@@ -63,6 +66,7 @@ export function PricingSection() {
       ],
       cta: "Start 14-day Free Trial",
       href: "/signup?plan=pro",
+      planId: "PRO",
       highlighted: false,
     },
   ];
@@ -171,16 +175,29 @@ export function PricingSection() {
                   </li>
                 ))}
               </ul>
-              <Link
-                href={plan.href}
-                className={`block w-full text-center font-semibold py-3 rounded-xl transition-all ${
-                  plan.highlighted
-                    ? "gradient-primary text-white hover:opacity-90"
-                    : "border border-border text-foreground hover:bg-muted"
-                }`}
-              >
-                {plan.cta}
-              </Link>
+              {isLoggedIn && plan.planId !== "FREE" ? (
+                <RazorpayButton
+                  plan={plan.planId as any}
+                  interval={isYearly ? "YEARLY" : "MONTHLY"}
+                  label={plan.cta}
+                  className={`block w-full text-center font-semibold py-3 rounded-xl transition-all ${
+                    plan.highlighted
+                      ? "gradient-primary text-white hover:opacity-90"
+                      : "border border-border text-foreground hover:bg-muted"
+                  }`}
+                />
+              ) : (
+                <Link
+                  href={isLoggedIn && plan.planId === "FREE" ? "/dashboard" : plan.href}
+                  className={`block w-full text-center font-semibold py-3 rounded-xl transition-all ${
+                    plan.highlighted
+                      ? "gradient-primary text-white hover:opacity-90"
+                      : "border border-border text-foreground hover:bg-muted"
+                  }`}
+                >
+                  {isLoggedIn && plan.planId === "FREE" ? "Go to Dashboard" : plan.cta}
+                </Link>
+              )}
             </div>
           ))}
         </div>

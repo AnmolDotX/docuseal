@@ -468,7 +468,7 @@ export default async function HomePage() {
         </div>
       </section>
 
-      <PricingSection />
+      <PricingSection isLoggedIn={!!session?.user} />
 
       {/* ─── FAQ ──────────────────────────────────────────────────────── */}
       <section className="py-20 px-4 bg-muted/40">
